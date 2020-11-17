@@ -33,17 +33,8 @@ function CustomHandler:access(config)
     end
 
     local ok, err = do_authentication(config)
-    if not ok then
-        if conf.anonymous then
-            local consumer_cache_key = kong.db.consumers:cache_key(conf.anonymous)
-            local consumer, err = kong.cache:get(consumer_cache_key, nil, kong.client.load_consumer, conf.anonymous, true)
-            if err then
-                return kong.response.error(500, "Invalid plugin config: Anonymous user not set.")
-            end
-            kong.client.authenticate(consumer)
-        else
-            return kong.response.error(err.status, err.message, err.headers)
-        end
+    if err then
+        return kong.response.error(err.status, err.message, err.headers)
     end
 
     local redirect_back = ngx.var.cookie_EOAuthRedirectBack
