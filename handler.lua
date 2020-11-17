@@ -2,11 +2,9 @@
 
 local BasePlugin = require "kong.plugins.base_plugin"
 local kong_utils = require "kong.tools.utils"
-local constants = require "kong.constants"
+local groups = require "kong.plugins.acl.groups"
 
 local kong = kong
-local error = error
-local concat = table.concat
 local CustomHandler = BasePlugin:extend()
 
 CustomHandler.VERSION  = "0.0-0"
@@ -89,8 +87,14 @@ function do_authentication(config)
         return nil, {status = 500, message = err}
     end
 
-    -- TODO ngx.ctx.authenticated_groups (see ACL plugin which blocks without session)
+    local consumer_groups, err = groups.get_consumer_groups(consumer.id)
+    if err then
+        kong.log.err(err)
+        return nil, {status = 500, message = err}
+    end
+
     kong.client.authenticate(consumer, credential)
+    ngx.ctx.authenticated_groups = consumer_groups
     return true
 end
 
