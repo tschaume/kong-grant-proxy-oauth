@@ -3,11 +3,10 @@
 local BasePlugin = require "kong.plugins.base_plugin"
 local kong_utils = require "kong.tools.utils"
 local constants = require "kong.constants"
-local digest = require "openssl.digest"
-local cipher = require "openssl.cipher"
-local rand = require "openssl.rand"
 
 local kong = kong
+local error = error
+local concat = table.concat
 local CustomHandler = BasePlugin:extend()
 
 CustomHandler.VERSION  = "0.0-0"
@@ -18,73 +17,74 @@ function CustomHandler:new()
 end
 
 function CustomHandler:access(config)
+    if config.anonymous and kong.client.get_credential() then
+        -- we're already authenticated, and we're configured for using anonymous,
+        -- hence we're in a logical OR between auth methods and we're already done.
+        return
+    end
+
     CustomHandler.super.access(self)
     local access_token = kong.request.get_query_arg("access_token")
-    local encrypted_token = ngx.var.cookie_EOAuthToken
 
-    if encrypted_token then
-        local access_token = decode_token(encrypted_token, config)
-        if not access_token then
-          return redirect_to_auth(config)
-        end
-    elseif access_token then
-        -- set access token cookie
-        local encoded_token = encode_token(access_token, config)
-        local cookie_opts = "path=/;Max-Age=" .. config.auth_token_expire_time .. ";HttpOnly"
-        kong.response.set_header("Set-Cookie", "EOAuthToken=" .. encoded_token  .. ";" .. cookie_opts)
-
-        -- consumer
-        local username = kong.request.get_query_arg("profile[email]")
-        if username then
-            local consumer_cache_key = kong.db.consumers:cache_key(username)
-            local consumer, err = kong.cache:get(consumer_cache_key, nil, load_consumer_by_username, username)
-            if err then
-                return kong.response.exit(500, {message = err})
-            else
-                ngx.ctx.authenticated_consumer = consumer
-                local acls_cache_key = kong.db.acls:cache_key(consumer.id)
-                local groups, err = kong.cache:get(acls_cache_key, nil, load_groups_into_memory, {id = consumer.id})
-                if err then
-                    return kong.response.exit(500, {message = err})
-                else
-                    ngx.ctx.authenticated_groups = groups
-                    local apikeys_cache_key = kong.db.keyauth_credentials:cache_key(consumer.id)
-                    local apikeys, err = kong.cache:get(apikeys_cache_key, nil, load_apikeys_into_memory, {id = consumer.id})
-                    if err then
-                        return kong.response.exit(500, {message = err})
-                    else
-                        ngx.ctx.authenticated_credential = {id = "apikey", consumer_id = consumer.id}
-                        local set_header = kong.service.request.set_header
-                        set_header(constants.HEADERS.CONSUMER_ID, consumer.id)
-                        set_header(constants.HEADERS.CONSUMER_CUSTOM_ID, apikeys[#apikeys])
-                        set_header(constants.HEADERS.CONSUMER_USERNAME, consumer.username)
-                        set_header(constants.HEADERS.CONSUMER_GROUPS, table.concat(groups, ","))
-                        -- TODO set_header(constants.HEADERS.ANONYMOUS, true) see basic_auth plugin
-                    end
-                end
-            end
-        else
-            return kong.response.exit(500, {message = "email not found in user profile"})
-        end
-
-        -- Support redirection back to your request if necessary
-        local redirect_back = ngx.var.cookie_EOAuthRedirectBack
-        if redirect_back then
+    if access_token then
+        local ok, err = do_authentication(config)
+        if ok then
+            local redirect_back = ngx.var.cookie_EOAuthRedirectBack
             return ngx.redirect(redirect_back)
         else
-            return ngx.redirect(ngx.ctx.router_matches)
+            if config.anonymous then
+                local consumer_cache_key = kong.db.consumers:cache_key(config.anonymous)
+                local consumer, err = kong.cache:get(consumer_cache_key, nil, kong.client.load_consumer, config.anonymous, true)
+                if err then
+                    return error(err)
+                end
+                set_consumer(consumer)
+            else
+                return kong.response.error(err.status, err.message, err.headers)
+            end
         end
     else
-        -- return kong.response.exit(401, {message = "User has denied access to the resources."})
         return redirect_to_auth(config)
     end
 end
 
+function do_authentication(config)
+    local username = kong.request.get_query_arg("profile[email]")
+    if not username then
+        return nil, {status = 401, message = "No email or user has denied access."}
+    end
+
+    local cache = kong.cache
+    local consumer_cache_key = kong.db.consumers:cache_key(username)
+    local consumer, err = cache:get(consumer_cache_key, nil, load_consumer_by_username, username)
+    if err then
+        kong.log.err(err)
+        return nil, {status = 500, message = err}
+    end
+
+    local acls_cache_key = kong.db.acls:cache_key(consumer.id)
+    local groups, err = cache:get(acls_cache_key, nil, load_groups_into_memory, {id = consumer.id})
+    if err then
+        kong.log.err(err)
+        return nil, {status = 500, message = err}
+    end
+
+    local credential_cache_key = kong.db.keyauth_credentials:cache_key(consumer.id)
+    local credential, err = cache:get(credential_cache_key, nil, load_credential, {id = consumer.id})
+    if err then
+        kong.log.err(err)
+        return nil, {status = 500, message = err}
+    end
+
+    set_consumer(consumer, credential, groups)
+    return true
+end
+
 function redirect_to_auth(config)
     -- TODO not on ajax, anonymous consumer, loop providers?
+    -- TODO go to grunt server through internal network here? config.host = sso.materialsproject.org
     local rb_cookie = "EOAuthRedirectBack=" .. ngx.var.request_uri .. "; path=/;Max-Age=120"
     kong.response.set_header("Set-Cookie", rb_cookie)
-    -- TODO go to grunt server through internal network here? config.host = sso.materialsproject.org
     local connect = config.host .. "/connect/" .. config.provider
     local scheme = kong.request.get_scheme()
     local host = kong.request.get_host()
@@ -94,41 +94,53 @@ function redirect_to_auth(config)
     return ngx.redirect(connect .. "?callback=" .. callback)
 end
 
-function binary_to_hex(string)
-    return (string:gsub('.', function (char)
-        return string.format('%02X', string.byte(char))
-    end))
-end
+function set_consumer(consumer, credential, groups)
+    kong.client.authenticate(consumer, credential)
 
-function hex_to_binary(string)
-    return (string:gsub('..', function (chars)
-        return string.char(tonumber(chars, 16))
-    end))
-end
+    local set_header = kong.service.request.set_header
+    local clear_header = kong.service.request.clear_header
 
-function encrypt(type, key, plaintext)
-    -- generate random initialization vector
-    local iv = rand.bytes(16)
-    return binary_to_hex(
-        iv .. cipher.new(type):encrypt(key, iv):final(plaintext)
-    )
-end
+    if consumer and consumer.id then
+        set_header(constants.HEADERS.CONSUMER_ID, consumer.id)
+    else
+        clear_header(constants.HEADERS.CONSUMER_ID)
+    end
 
-function decrypt(type, key, encrypted)
-    -- first 16 bytes are the initialization vector
-    local iv = hex_to_binary(encrypted:sub(0 + 1, 31 + 1))
-    local string = hex_to_binary(encrypted:sub(32 + 1))
-    return cipher.new(type):decrypt(key, iv):final(string)
-end
+    if consumer and consumer.custom_id then
+        set_header(constants.HEADERS.CONSUMER_CUSTOM_ID, consumer.custom_id)
+    else
+        clear_header(constants.HEADERS.CONSUMER_CUSTOM_ID)
+    end
 
-function encode_token(token, config)
-    local md5_secret = digest.new("md5"):final(config.secret)
-    return ngx.encode_base64(encrypt("aes-128-cbc", md5_secret, token))
-end
+    if consumer and consumer.username then
+        set_header(constants.HEADERS.CONSUMER_USERNAME, consumer.username)
+    else
+        clear_header(constants.HEADERS.CONSUMER_USERNAME)
+    end
 
-function decode_token(token, config)
-    local md5_secret = digest.new("md5"):final(config.secret)
-    return decrypt("aes-128-cbc", md5_secret, ngx.decode_base64(token))
+    if credential then
+        if credential.username then
+            set_header(constants.HEADERS.CREDENTIAL_USERNAME, credential.username)
+        else
+            clear_header(constants.HEADERS.CREDENTIAL_USERNAME)
+        end
+
+        clear_header(constants.HEADERS.ANONYMOUS)
+
+        -- apikey = ngx.encode_base64(credential....)
+        -- TODO set_header(constants.HEADERS.CONSUMER_CUSTOM_ID, apikey)
+
+    else
+        clear_header(constants.HEADERS.CREDENTIAL_USERNAME)
+        set_header(constants.HEADERS.ANONYMOUS, true)
+    end
+
+    if groups then
+        set_header(constants.HEADERS.AUTHENTICATED_GROUPS, concat(groups, ", "))
+        ngx.ctx.authenticated_groups = groups
+    else
+        clear_header(constants.HEADERS.AUTHENTICATED_GROUPS)
+    end
 end
 
 function load_consumer_by_username(consumer_username)
@@ -138,7 +150,6 @@ function load_consumer_by_username(consumer_username)
         if err then
             return nil, err
         else
-            -- create consumer when not found in cache and no error occured
             local consumer, err = kong.db.consumers:insert({
                 id = kong_utils.uuid(),
                 username = consumer_username
@@ -174,19 +185,13 @@ function load_groups_into_memory(consumer_pk)
     return groups
 end
 
-function load_apikeys_into_memory(consumer_pk)
-    local apikeys = {}
-    local len = 0
-
+function load_credential(consumer_pk)
     for row, err in kong.db.keyauth_credentials:each_for_consumer(consumer_pk) do
         if err then
             return nil, err
         end
-        len = len + 1
-        apikeys[len] = ngx.encode_base64(row)
+        return row
     end
-
-    return apikeys
 end
 
 return CustomHandler
