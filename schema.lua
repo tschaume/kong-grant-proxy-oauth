@@ -22,7 +22,6 @@ return {
             type = "record",
             fields = {
                 {host = typedefs.url {default = "http://localhost:3000"}},
-                {provider = {type = "string", default = "phantauth"}},
                 {secret = {type = "string", required = false, default = random_string()}},
                 {anonymous = {type = "string", uuid = true, required = true}},
             },

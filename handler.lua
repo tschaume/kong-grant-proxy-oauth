@@ -55,7 +55,7 @@ end
 function do_authentication(config)
     local username = kong.request.get_query_arg("profile[email]")
     if not username then
-        return nil, {status = 401, message = config.provider .. "does not provide email."}
+        return nil, {status = 401, message = "Email missing in provider callback."}
     end
 
     local consumer, err = kong.client.load_consumer(username, true)
@@ -73,7 +73,7 @@ function do_authentication(config)
                 if err then
                     return nil, {status = 500, message = err}
                 end
-                apikey = ngx.encode_base64(credential.key)
+                local apikey = ngx.encode_base64(credential.key)
                 local consumer, err = kong.db.consumers:update({id = consumer.id}, {custom_id = apikey})
                 if err then
                     return nil, {status = 500, message = err}
@@ -89,16 +89,20 @@ function do_authentication(config)
         return nil, {status = 500, message = err}
     end
 
+    -- TODO ngx.ctx.authenticated_groups (see ACL plugin which blocks without session)
     kong.client.authenticate(consumer, credential)
     return true
 end
 
 function redirect_to_auth(config)
-    -- TODO not on ajax, loop providers?
-    -- TODO go to grunt server through internal network here? config.host = sso.materialsproject.org
     local rb_cookie = "EOAuthRedirectBack=" .. ngx.var.request_uri .. "; path=/;Max-Age=120"
     kong.response.set_header("Set-Cookie", rb_cookie)
-    local connect = config.host .. "/connect/" .. config.provider
+    local provider = ngx.ctx.router_matches.uri_captures.provider
+    if not provider then
+        return kong.response.error(500, "Invalid route: provider capture group missing.")
+    end
+
+    local connect = config.host .. "/connect/" .. provider
     local scheme = kong.request.get_scheme()
     local host = kong.request.get_host()
     local port = kong.request.get_port()
