@@ -43,8 +43,8 @@ end
 
 function do_authentication(config)
     local username = kong.request.get_query_arg("profile[email]")
-    if not username then
-        return nil, {status = 401, message = "Email missing in provider callback."}
+    if not username or username == "" then
+        return nil, {status = 401, message = "Email missing in provider callback"}
     end
 
     local consumer, err = kong.client.load_consumer(username, true)
