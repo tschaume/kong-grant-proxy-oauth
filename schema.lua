@@ -21,9 +21,16 @@ return {
         {config = {
             type = "record",
             fields = {
-                {host = typedefs.url {default = "http://localhost:3000"}},
-                {secret = {type = "string", required = false, default = random_string()}},
+                {host = typedefs.url {default = "http://localhost:3000", required = true}},
+                {secret = {type = "string", required = true, default = random_string()}},
                 {anonymous = {type = "string", uuid = true, required = true}},
+                {twitter = {
+                    type = "record",
+                    fields = {
+                        {key = {type = "string"}},
+                        {secret = {type = "string"}}
+                    }
+                }},
             },
         }},
     },

@@ -8,6 +8,7 @@ RUN luarocks install kong-response-size-limiting
 RUN luarocks install kong-log-google
 RUN luarocks install https://raw.githubusercontent.com/tschaume/kong-oidc/release/kong-oidc-1.1.0-0.rockspec
 RUN luarocks install https://raw.githubusercontent.com/tschaume/kong-oidc-consumer/release/kong-oidc-consumer-0.0.1-1.rockspec
+RUN luarocks install https://raw.githubusercontent.com/leafo/lua-twitter/master/twitter-dev-1.rockspec
 
 COPY . /grant-proxy-oauth
 RUN cd /grant-proxy-oauth && luarocks make

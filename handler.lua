@@ -3,6 +3,7 @@
 local BasePlugin = require "kong.plugins.base_plugin"
 local kong_utils = require "kong.tools.utils"
 local groups = require "kong.plugins.acl.groups"
+local twitter = require("twitter")
 
 local kong = kong
 local CustomHandler = BasePlugin:extend()
@@ -44,7 +45,24 @@ end
 function do_authentication(config)
     local username = kong.request.get_query_arg("profile[email]")
     if not username or username == "" then
-        return nil, {status = 401, message = "Email missing in provider callback"}
+        local provider = ngx.ctx.router_matches.uri_captures.provider
+        if provider == "twitter" and config.twitter.key and config.twitter.secret then
+            local oauth_token = kong.request.get_query_arg("raw[oauth_token]")
+            local oauth_token_secret = kong.request.get_query_arg("raw[oauth_token_secret]")
+            local user_client = twitter.Twitter({
+                access_token = oauth_token,
+                access_token_secret = oauth_token_secret,
+                consumer_key = config.twitter.key,
+                consumer_secret = config.twitter.secret
+            })
+            username = twitter_email(user_client)
+            kong.log.warn("USERNAME", username)
+            if not username then
+                return nil, {status = 401, message = "Please add an e-mail address to your Twitter profile"}
+            end
+        else
+            return nil, {status = 401, message = "Email missing in provider callback"}
+        end
     end
 
     local consumer, err = kong.client.load_consumer(username, true)
@@ -104,6 +122,19 @@ function redirect_to_auth(config)
     local path = kong.request.get_path_with_query()
     local callback = scheme .. "://" .. host .. ":" .. port .. path
     return ngx.redirect(connect .. "?callback=" .. callback)
+end
+
+function twitter_email(client)
+    local opts = {skip_status = true, include_email = true, include_entities = false}
+    kong.log.warn("SEND TWITTER REQUEST")
+    resp = client:_request("GET", "/1.1/account/verify_credentials.json", opts)
+    kong.log.warn("RESPONSE", resp)
+    result = client:_handle_error(result)
+    if not result then
+        return kong.response.error(500, "Failed to retrieve email from Twitter")
+    end
+    kong.log.warn(result)
+    return result.email
 end
 
 function load_credential(consumer_pk)
