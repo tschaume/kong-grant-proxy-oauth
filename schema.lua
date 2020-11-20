@@ -21,9 +21,7 @@ return {
         {config = {
             type = "record",
             fields = {
-                {host = typedefs.url {default = "http://localhost:3000"}},
                 {secret = {type = "string", required = false, default = random_string()}},
-                {anonymous = {type = "string", uuid = true, required = true}},
             },
         }},
     },

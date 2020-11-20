@@ -15,9 +15,8 @@ function CustomHandler:new()
 end
 
 function CustomHandler:access(config)
-    if config.anonymous and kong.client.get_credential() then
-        -- we're already authenticated, and we're configured for using anonymous,
-        -- hence we're in a logical OR between auth methods and we're already done.
+    if kong.client.get_consumer() and kong.client.get_credential() then
+        -- already authenticated through global session plugin
         return
     end
 
@@ -29,7 +28,12 @@ function CustomHandler:access(config)
 
     local access_token = kong.request.get_query_arg("access_token")
     if not access_token then
-        return redirect_to_auth(config)
+        local referrer = kong.request.get_header("referrer")
+        if referrer then
+            local rb_cookie = "GrantReferrer=" .. referrer .. "; path=/;Max-Age=120"
+            kong.response.set_header("Set-Cookie", rb_cookie)
+        end
+        return
     end
 
     local ok, err = do_authentication(config)
@@ -37,8 +41,12 @@ function CustomHandler:access(config)
         return kong.response.error(err.status, err.message, err.headers)
     end
 
-    local redirect_back = ngx.var.cookie_EOAuthRedirectBack
-    return ngx.redirect(redirect_back)
+    local referrer = ngx.var.cookie_GrantReferrer
+    if referrer then
+        return ngx.redirect(referrer)
+    end
+
+    return ngx.redirect(kong.request.get_path())
 end
 
 function do_authentication(config)
@@ -87,23 +95,6 @@ function do_authentication(config)
     kong.client.authenticate(consumer, credential)
     ngx.ctx.authenticated_groups = consumer_groups
     return true
-end
-
-function redirect_to_auth(config)
-    local rb_cookie = "EOAuthRedirectBack=" .. ngx.var.request_uri .. "; path=/;Max-Age=120"
-    kong.response.set_header("Set-Cookie", rb_cookie)
-    local provider = ngx.ctx.router_matches.uri_captures.provider
-    if not provider then
-        return kong.response.error(500, "Invalid route: provider capture group missing.")
-    end
-
-    local connect = config.host .. "/connect/" .. provider
-    local scheme = kong.request.get_scheme()
-    local host = kong.request.get_host()
-    local port = kong.request.get_port()
-    local path = kong.request.get_path_with_query()
-    local callback = scheme .. "://" .. host .. ":" .. port .. path
-    return ngx.redirect(connect .. "?callback=" .. callback)
 end
 
 function load_credential(consumer_pk)
