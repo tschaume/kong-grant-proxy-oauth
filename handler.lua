@@ -70,8 +70,7 @@ function do_authentication(config)
                 if err then
                     return nil, {status = 500, message = err}
                 end
-                local apikey = ngx.encode_base64(credential.key)
-                local consumer, err = kong.db.consumers:update({id = consumer.id}, {custom_id = apikey})
+                local consumer, err = kong.db.consumers:update({id = consumer.id}, {custom_id = credential.key})
                 if err then
                     return nil, {status = 500, message = err}
                 end
