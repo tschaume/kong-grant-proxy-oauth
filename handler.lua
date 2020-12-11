@@ -83,6 +83,7 @@ function CustomHandler:access(config)
     end
 
     if type(data.grant.response) ~= "table" then
+        -- not done with full oauth cycle yet
         local ok, err = do_authentication(config.anonymous, true)
         if err then
             return kong.response.exit(err.status, err.message, err.headers)
@@ -90,7 +91,7 @@ function CustomHandler:access(config)
         return
     end
 
-    -- set username
+    -- authenticate user
     local provider = data.grant.provider
     local email = data.grant.response.profile.email
     local username = provider .. ":" .. email
@@ -98,6 +99,14 @@ function CustomHandler:access(config)
     local ok, err = do_authentication(username)
     if err then
         return kong.response.exit(err.status, err.message, err.headers)
+    end
+
+    if not ok then
+        local ok, err = do_authentication(config.anonymous, true)
+        if err then
+            return kong.response.exit(err.status, err.message, err.headers)
+        end
+        return
     end
 
     -- destroy resty_session and grant session
@@ -129,13 +138,10 @@ end
 -- end
 
 function do_authentication(consumerid_or_username, anonymous)
-    local consumer_cache_key = kong.db.consumers:cache_key(consumerid_or_username)
-    local consumer, err = kong.cache:get(
-        consumer_cache_key, nil, kong.client.load_consumer, consumerid_or_username, true
-    )
-    if err then
-        kong.log.err(err)
-        return nil, {status = 500, message = err}
+    local consumer = kong.client.load_consumer(consumerid_or_username, true)
+    if not consumer then
+        -- consumer not created by grant server yet
+        return false
     end
 
     local ok, err = authenticate(consumer, anonymous)
