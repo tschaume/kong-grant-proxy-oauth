@@ -1,8 +1,11 @@
 -- Copyright 2020 Patrick Huck
 
+local resty_session = require "resty.session"
+local constants = require "kong.constants"
 local BasePlugin = require "kong.plugins.base_plugin"
 local kong_utils = require "kong.tools.utils"
 local groups = require "kong.plugins.acl.groups"
+-- local openssl = require('openssl')
 
 local kong = kong
 local CustomHandler = BasePlugin:extend()
@@ -15,85 +18,152 @@ function CustomHandler:new()
 end
 
 function CustomHandler:access(config)
-    if kong.client.get_consumer() and kong.client.get_credential() then
+    CustomHandler.super.access(self)
+    local consumer = kong.client.get_consumer()
+    local credential = kong.client.get_credential()
+
+    if config.anonymous and consumer and credential then
         -- already authenticated through global session plugin
         return
     end
 
-    CustomHandler.super.access(self)
-    local error_message = kong.request.get_query_arg("error_description")
-    if error_message then
-        return kong.response.error(403, error_message)
+    -- get username (provider:email) from grant session in redis
+    -- different accounts for different providers to avoid potential hijacking
+    local opts = {name = "grant_session", storage = "redis", secret = config.secret}
+    if config.environment == "development" then
+        opts.redis = {host = "redis"}
     end
-
-    local access_token = kong.request.get_query_arg("access_token")
-    if not access_token then
-        local referrer = kong.request.get_header("referrer")
-        if referrer then
-            local rb_cookie = "GrantReferrer=" .. referrer .. "; path=/;Max-Age=120"
-            kong.response.set_header("Set-Cookie", rb_cookie)
+    local session = resty_session.new(opts)
+    local cookie = resty_session.get_cookie(session)
+    if not cookie then
+        local destroyed = session.destroy()
+        if not destroyed then
+            return kong.response.exit(500, "resty session not destroyed")
+        end
+        local ok, err = do_authentication(config.anonymous, true)
+        if err then
+            return kong.response.exit(err.status, err.message, err.headers)
         end
         return
     end
 
-    local ok, err = do_authentication(config)
+    -- URL-unescape cookie and check prefix
+    cookie = ngx.unescape_uri(cookie)
+    local prefix = string.sub(cookie, 1, 2)
+    if prefix ~= "s:" then
+        return kong.response.exit(500, "wrong cookie prefix")
+    end
+
+    -- get session ID
+    local sep_idx = string.find(cookie, '.', 3, true)
+    local session_id = string.sub(cookie, 3, sep_idx-1)
+
+    -- TODO check signature
+    -- local signed, err = sign(session_id, config.secret)
+    -- if err then
+    --     return kong.response.exit(500, err)
+    -- end
+    -- if session_id ~= signed then
+    --     return kong.response.exit(500, "invalid signature")
+    -- end
+
+    -- retrieve session data
+    local data, err = session.storage:open(session_id)
+    if err or not data then
+        local ok, err = do_authentication(config.anonymous, true)
+        if err then
+            return kong.response.exit(err.status, err.message, err.headers)
+        end
+        return
+    end
+
+    data, err = session.serializer.deserialize(data)
     if err then
-        return kong.response.error(err.status, err.message, err.headers)
+        return kong.response.exit(500, err)
     end
 
-    local referrer = ngx.var.cookie_GrantReferrer
-    if referrer then
-        return ngx.redirect(referrer)
+    if type(data.grant.response) ~= "table" then
+        local ok, err = do_authentication(config.anonymous, true)
+        if err then
+            return kong.response.exit(err.status, err.message, err.headers)
+        end
+        return
     end
 
-    return ngx.redirect(kong.request.get_path())
+    -- set username
+    local provider = data.grant.provider
+    local email = data.grant.response.profile.email
+    local username = provider .. ":" .. email
+
+    local ok, err = do_authentication(username)
+    if err then
+        return kong.response.exit(err.status, err.message, err.headers)
+    end
+
+    -- destroy resty_session and grant session
+    local destroyed = session.destroy()
+    if not destroyed then
+        return kong.response.exit(500, "resty session not destroyed")
+    end
+
+    local ok, err = session.storage:destroy(session_id)
+    if not ok or err then
+        return kong.response.exit(500, err)
+    end
+
+    kong.log.warn(username .. " authenticated")
 end
 
-function do_authentication(config)
-    local username = kong.request.get_query_arg("profile[email]")
-    if not username or username == "" then
-        return nil, {status = 401, message = "Email missing in provider callback"}
+-- see https://github.com/tj/node-cookie-signature/blob/master/index.js
+-- function sign(val, secret)
+--     local digest, err = openssl.hmac.digest('sha256', val, secret)
+--     if err then
+--         return nil, err
+--     end
+--     local encoded, err = openssl.base64(digest)
+--     if err then
+--         return nil, err
+--     end
+--     local signature = encoded -- TODO .replace(/\=+$/, '')
+--     return val .. "." .. signature
+-- end
+
+function do_authentication(consumerid_or_username, anonymous)
+    local consumer_cache_key = kong.db.consumers:cache_key(consumerid_or_username)
+    local consumer, err = kong.cache:get(
+        consumer_cache_key, nil, kong.client.load_consumer, consumerid_or_username, true
+    )
+    if err then
+        kong.log.err(err)
+        return nil, {status = 500, message = err}
     end
 
-    local consumer, err = kong.client.load_consumer(username, true)
-    if not consumer then
-        if err then
-            kong.log.err(err)
-            return nil, {status = 500, message = err}
-        else
-            -- create consumer and associated api key
-            consumer, err = kong.db.consumers:insert({id = kong_utils.uuid(), username = username})
-            if err then
-                return nil, {status = 500, message = err}
-            else
-                local credential, err = kong.db.keyauth_credentials:insert({consumer = consumer})
-                if err then
-                    return nil, {status = 500, message = err}
-                end
-                local consumer, err = kong.db.consumers:update({id = consumer.id}, {custom_id = credential.key})
-                if err then
-                    return nil, {status = 500, message = err}
-                end
-            end
-        end
+    local ok, err = authenticate(consumer, anonymous)
+    if err then
+        kong.log.err(err)
+        return nil, {status = 500, message = err}
+    end
+
+    return true
+end
+
+function authenticate(consumer, anonymous)
+    if anonymous then
+        return set_consumer(consumer)
     end
 
     local cache_key = kong.db.keyauth_credentials:cache_key(consumer.id)
     local credential, err = kong.cache:get(cache_key, nil, load_credential, {id = consumer.id})
     if err then
-        kong.log.err(err)
-        return nil, {status = 500, message = err}
+        return nil, err
     end
 
     local consumer_groups, err = groups.get_consumer_groups(consumer.id)
     if err then
-        kong.log.err(err)
-        return nil, {status = 500, message = err}
+        return nil, err
     end
 
-    kong.client.authenticate(consumer, credential)
-    ngx.ctx.authenticated_groups = consumer_groups
-    return true
+    return set_consumer(consumer, credential, consumer_groups)
 end
 
 function load_credential(consumer_pk)
@@ -103,6 +173,51 @@ function load_credential(consumer_pk)
         end
         return row
     end
+end
+
+function set_consumer(consumer, credential, groups)
+    local set_header = kong.service.request.set_header
+    local clear_header = kong.service.request.clear_header
+
+    if consumer.id then
+        set_header(constants.HEADERS.CONSUMER_ID, consumer.id)
+    else
+        clear_header(constants.HEADERS.CONSUMER_ID)
+    end
+
+    if consumer.custom_id then
+        set_header(constants.HEADERS.CONSUMER_CUSTOM_ID, consumer.custom_id)
+    else
+        clear_header(constants.HEADERS.CONSUMER_CUSTOM_ID)
+    end
+
+    if consumer.username then
+        set_header(constants.HEADERS.CONSUMER_USERNAME, consumer.username)
+    else
+        clear_header(constants.HEADERS.CONSUMER_USERNAME)
+    end
+
+    if groups then
+        set_header(constants.HEADERS.AUTHENTICATED_GROUPS, concat(groups, ", "))
+        ngx.ctx.authenticated_groups = groups
+    else
+        clear_header(constants.HEADERS.AUTHENTICATED_GROUPS)
+    end
+
+    if credential then
+        clear_header(constants.HEADERS.ANONYMOUS)
+        if constants.HEADERS.CREDENTIAL_IDENTIFIER then
+            set_header(constants.HEADERS.CREDENTIAL_IDENTIFIER, credential.id)
+        end
+    else
+        set_header(constants.HEADERS.ANONYMOUS, true)
+        if constants.HEADERS.CREDENTIAL_IDENTIFIER then
+            clear_header(constants.HEADERS.CREDENTIAL_IDENTIFIER)
+        end
+    end
+
+    kong.client.authenticate(consumer, credential)
+    return true
 end
 
 return CustomHandler
