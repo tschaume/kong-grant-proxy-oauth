@@ -22,13 +22,13 @@ function CustomHandler:access(config)
     local consumer = kong.client.get_consumer()
     local credential = kong.client.get_credential()
 
+    -- check if already authenticated through global session plugin
     if config.anonymous and consumer and credential then
-        -- already authenticated through global session plugin
+        kong.log.debug(consumer.username .. " - session authenticated")
         return
     end
 
-    -- get username (provider:email) from grant session in redis
-    -- different accounts for different providers to avoid potential hijacking
+    -- set up session and init with grant cookie
     local opts = {name = "grant_session", storage = "redis", secret = config.secret}
     if config.environment == "development" then
         opts.redis = {host = "redis"}
@@ -36,15 +36,8 @@ function CustomHandler:access(config)
     local session = resty_session.new(opts)
     local cookie = resty_session.get_cookie(session)
     if not cookie then
-        local destroyed = session.destroy()
-        if not destroyed then
-            return kong.response.exit(500, "resty session not destroyed")
-        end
-        local ok, err = do_authentication(config.anonymous, true)
-        if err then
-            return kong.response.exit(err.status, err.message, err.headers)
-        end
-        return
+        kong.log.debug("anonymous - grant cookie missing")
+        return do_authentication(session, nil, config.anonymous)
     end
 
     -- URL-unescape cookie and check prefix
@@ -70,57 +63,42 @@ function CustomHandler:access(config)
     -- retrieve session data
     local data, err = session.storage:open(session_id)
     if err or not data then
-        local ok, err = do_authentication(config.anonymous, true)
-        if err then
-            return kong.response.exit(err.status, err.message, err.headers)
-        end
-        return
+        kong.log.debug("anonymous - failed to retrieve grant session data")
+        return do_authentication(session, nil, config.anonymous)
     end
 
+    -- serialize session data
     data, err = session.serializer.deserialize(data)
     if err then
-        return kong.response.exit(500, err)
+        kong.log.debug("anonymous - failed to deserialize grant session data")
+        return do_authentication(session, nil, config.anonymous)
     end
 
+    -- check if oauth cycle completed
     if type(data.grant.response) ~= "table" then
-        -- not done with full oauth cycle yet
-        local ok, err = do_authentication(config.anonymous, true)
-        if err then
-            return kong.response.exit(err.status, err.message, err.headers)
-        end
-        return
+        kong.log.debug("anonymous - grant oauth cycle not completed yet")
+        return do_authentication(session, nil, config.anonymous)
     end
 
-    -- authenticate user
+    -- get username <provider>:<email>
+    -- different accounts for different providers to avoid potential hijacking
     local provider = data.grant.provider
     local email = data.grant.response.profile.email
     local username = provider .. ":" .. email
 
-    local ok, err = do_authentication(username)
-    if err then
-        return kong.response.exit(err.status, err.message, err.headers)
-    end
+    -- authenticate user
+    do_authentication(session, username, config.anonymous)
 
-    if not ok then
-        local ok, err = do_authentication(config.anonymous, true)
+    -- destroy grant session
+    if kong.client.get_credential() then
+        local ok, err = session.storage:destroy(session_id)
         if err then
-            return kong.response.exit(err.status, err.message, err.headers)
+            return kong.response.exit(500, err)
         end
-        return
+        if not ok then
+            return kong.response.exit(500, "failed to destroy " .. session_id)
+        end
     end
-
-    -- destroy resty_session and grant session
-    local destroyed = session.destroy()
-    if not destroyed then
-        return kong.response.exit(500, "resty session not destroyed")
-    end
-
-    local ok, err = session.storage:destroy(session_id)
-    if not ok or err then
-        return kong.response.exit(500, err)
-    end
-
-    kong.log.warn(username .. " authenticated")
 end
 
 -- see https://github.com/tj/node-cookie-signature/blob/master/index.js
@@ -137,27 +115,44 @@ end
 --     return val .. "." .. signature
 -- end
 
-function do_authentication(consumerid_or_username, anonymous)
-    local consumer = kong.client.load_consumer(consumerid_or_username, true)
+function do_authentication(session, consumerid_or_username, anonymous)
+    -- load consumer
+    local consumer
+    if consumerid_or_username then
+        consumer = kong.client.load_consumer(consumerid_or_username, true)
+        if not consumer then
+            -- consumer not created by grant server yet
+            kong.log.debug("anonymous - user not created yet: " .. consumerid_or_username)
+        end
+    end
+
+    -- destroy resty_session
+    session.data      = {}
+    session.present   = nil
+    session.opened    = nil
+    session.started   = nil
+    session.closed    = true
+    session.destroyed = true
+
+    -- load and authenticate anonymous consumer if needed
     if not consumer then
-        -- consumer not created by grant server yet
-        return false
-    end
-
-    local ok, err = authenticate(consumer, anonymous)
-    if err then
-        kong.log.err(err)
-        return nil, {status = 500, message = err}
-    end
-
-    return true
-end
-
-function authenticate(consumer, anonymous)
-    if anonymous then
+        consumer = kong.client.load_consumer(anonymous, true)
         return set_consumer(consumer)
     end
 
+    -- authenticate user (incl. credential and groups)
+    local ok, err = authenticate(consumer)
+    if err then
+        return kong.response.exit(500, err)
+    end
+    if not ok then
+        return kong.response.exit(500, "failed to authenticate " .. consumer.username)
+    end
+
+    kong.log.debug(consumerid_or_username .. " authenticated")
+end
+
+function authenticate(consumer)
     local cache_key = kong.db.keyauth_credentials:cache_key(consumer.id)
     local credential, err = kong.cache:get(cache_key, nil, load_credential, {id = consumer.id})
     if err then
