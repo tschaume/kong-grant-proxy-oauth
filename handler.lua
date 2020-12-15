@@ -61,20 +61,20 @@ function CustomHandler:access(config)
     -- retrieve session data
     local data, err = session.storage:open(session_id)
     if err or not data then
-        kong.log.info("anonymous - failed to retrieve grant session data")
+        kong.log.notice("anonymous - failed to retrieve grant session data")
         return do_authentication(session, nil, config.anonymous)
     end
 
     -- serialize session data
     data, err = session.serializer.deserialize(data)
     if err then
-        kong.log.info("anonymous - failed to deserialize grant session data")
+        kong.log.notice("anonymous - failed to deserialize grant session data")
         return do_authentication(session, nil, config.anonymous)
     end
 
     -- check if oauth cycle completed
     if type(data.grant.response) ~= "table" then
-        kong.log.info("anonymous - grant oauth cycle not completed yet")
+        kong.log.notice("anonymous - grant oauth cycle not completed yet")
         return do_authentication(session, nil, config.anonymous)
     end
 
@@ -120,7 +120,7 @@ function do_authentication(session, consumerid_or_username, anonymous)
         consumer = kong.client.load_consumer(consumerid_or_username, true)
         if not consumer then
             -- consumer not created by grant server yet
-            kong.log.info("anonymous - user not created yet: " .. consumerid_or_username)
+            kong.log.notice("anonymous - user not created yet: " .. consumerid_or_username)
         end
     end
 
@@ -147,7 +147,7 @@ function do_authentication(session, consumerid_or_username, anonymous)
         return kong.response.exit(500, "failed to authenticate " .. consumer.username)
     end
 
-    kong.log.info(consumerid_or_username .. " authenticated")
+    kong.log.notice(consumerid_or_username .. " authenticated")
 end
 
 function authenticate(consumer)
