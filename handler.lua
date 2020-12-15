@@ -30,9 +30,7 @@ function CustomHandler:access(config)
 
     -- set up session and init with grant cookie
     local opts = {name = "grant_session", storage = "redis", secret = config.secret}
-    if config.environment == "development" then
-        opts.redis = {host = "redis"}
-    end
+    opts.redis = {host = config.redis}
     local session = resty_session.new(opts)
     local cookie = resty_session.get_cookie(session)
     if not cookie then
