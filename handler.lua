@@ -197,7 +197,7 @@ function set_consumer(consumer, credential, groups)
     end
 
     if groups then
-        set_header(constants.HEADERS.AUTHENTICATED_GROUPS, concat(groups, ", "))
+        set_header(constants.HEADERS.AUTHENTICATED_GROUPS, table.concat(groups, ", "))
         ngx.ctx.authenticated_groups = groups
     else
         clear_header(constants.HEADERS.AUTHENTICATED_GROUPS)
