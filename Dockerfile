@@ -1,16 +1,17 @@
-FROM kong:2.2.0-alpine
+FROM kong:2.2.1-alpine
 
 USER root
 ENV LUA_PATH /usr/local/share/lua/5.1/?.lua;/usr/local/kong-oidc/?.lua;/usr/local/kong-oidc-consumer/?.lua;;
 
-RUN apk add --no-cache git openssl-dev gcc musl-dev
+RUN apk add --no-cache git
 RUN luarocks install kong-response-size-limiting
 RUN luarocks install kong-log-google
-RUN luarocks install https://raw.githubusercontent.com/stone-payments/kong-plugin-url-rewrite/master/kong-plugin-url-rewrite-0.5.1-0.rockspec
-RUN luarocks install https://raw.githubusercontent.com/tschaume/kong-plugin-redirect/master/kong-plugin-redirect-0.1-0.rockspec
-#RUN luarocks install https://raw.githubusercontent.com/tschaume/kong-oidc/release/kong-oidc-1.1.0-0.rockspec
-#RUN luarocks install https://raw.githubusercontent.com/tschaume/kong-oidc-consumer/release/kong-oidc-consumer-0.0.1-1.rockspec
-#RUN luarocks install openssl
+RUN git clone https://github.com/stone-payments/kong-plugin-url-rewrite.git && \
+    cd kong-plugin-url-rewrite && luarocks make
+RUN git clone https://github.com/tschaume/kong-plugin-redirect.git && \
+    cd kong-plugin-redirect && luarocks make
+RUN git clone https://github.com/tschaume/kong-plugin-session.git && \
+    cd kong-plugin-session && luarocks make
 
 COPY . /grant-proxy-oauth
 RUN cd /grant-proxy-oauth && luarocks make
