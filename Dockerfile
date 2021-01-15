@@ -1,7 +1,7 @@
-FROM kong:2.2.1-alpine
+FROM kong:2.3.0-alpine
 
 USER root
-ENV LUA_PATH /usr/local/share/lua/5.1/?.lua;/usr/local/kong-oidc/?.lua;/usr/local/kong-oidc-consumer/?.lua;;
+ENV LUA_PATH /usr/local/share/lua/5.1/?.lua;;
 
 RUN apk add --no-cache git
 RUN luarocks install kong-response-size-limiting
@@ -10,8 +10,6 @@ RUN git clone https://github.com/stone-payments/kong-plugin-url-rewrite.git && \
     cd kong-plugin-url-rewrite && luarocks make
 RUN git clone https://github.com/tschaume/kong-plugin-redirect.git && \
     cd kong-plugin-redirect && luarocks make
-RUN git clone https://github.com/tschaume/kong-plugin-session.git && \
-    cd kong-plugin-session && luarocks make
 
 COPY . /grant-proxy-oauth
 RUN cd /grant-proxy-oauth && luarocks make
