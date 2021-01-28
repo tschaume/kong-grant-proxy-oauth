@@ -1,4 +1,4 @@
-FROM kong:2.3.0-alpine
+FROM kong:2.3.1-alpine
 
 USER root
 ENV LUA_PATH /usr/local/share/lua/5.1/?.lua;;
