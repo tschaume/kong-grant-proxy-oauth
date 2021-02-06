@@ -4,9 +4,10 @@ local resty_session = require "resty.session"
 local constants = require "kong.constants"
 local BasePlugin = require "kong.plugins.base_plugin"
 local kong_utils = require "kong.tools.utils"
-local groups = require "kong.plugins.acl.groups"
+local acl_groups = require "kong.plugins.acl.groups"
 -- local openssl = require('openssl')
 
+local ngx = ngx
 local kong = kong
 local CustomHandler = BasePlugin:extend()
 
@@ -24,7 +25,12 @@ function CustomHandler:access(config)
 
     -- check if already authenticated through global session plugin
     if config.anonymous and consumer and credential then
-        kong.log.info(consumer.username .. " - session authenticated")
+        local consumer_groups, err = acl_groups.get_consumer_groups(consumer.id)
+        if err then
+            return kong.response.exit(500, "failed to retrieve groups for " .. consumer.username)
+        end
+        set_consumer(consumer, credential, consumer_groups)
+        kong.log.notice(consumer.username .. " - session authenticated")
         return
     end
 
@@ -157,7 +163,7 @@ function authenticate(consumer)
         return nil, err
     end
 
-    local consumer_groups, err = groups.get_consumer_groups(consumer.id)
+    local consumer_groups, err = acl_groups.get_consumer_groups(consumer.id)
     if err then
         return nil, err
     end
