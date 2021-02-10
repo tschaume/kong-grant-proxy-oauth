@@ -84,23 +84,42 @@ function CustomHandler:access(config)
         return do_authentication(session, nil, config.anonymous)
     end
 
-    -- get username <provider>:<email>
-    -- different accounts for different providers to avoid potential hijacking
+    -- check if email retrieved from provider
     local provider = data.grant.provider
     local email = data.grant.response.profile.email
-    local username = provider .. ":" .. email
+    if type(email) ~= "string" then
+        -- destroy grant session
+        local ok, err = session.storage:destroy(session_id)
+        if err or not ok then
+            msg = "failed to destroy " .. session_id
+            if err then
+                msg = msg .. " - " .. err
+            end
+            return kong.response.exit(500, msg)
+        end
+        -- return 500 with potential solution
+        local err = "failed to retrieve email from " .. provider
+        if provider == "github" then
+            err = err .. ' - unset "Keep my emails private" and '
+            err = err .. "set a public email in your GitHub settings"
+        end
+        return kong.response.exit(500, err)
+    end
 
-    -- authenticate user
+    -- authenticate user with username <provider>:<email>
+    -- different accounts for different providers to avoid potential hijacking
+    local username = provider .. ":" .. email
     do_authentication(session, username, config.anonymous)
 
     -- destroy grant session
     if kong.client.get_credential() then
         local ok, err = session.storage:destroy(session_id)
-        if err then
-            return kong.response.exit(500, err)
-        end
-        if not ok then
-            return kong.response.exit(500, "failed to destroy " .. session_id)
+        if err or not ok then
+            msg = "failed to destroy " .. session_id
+            if err then
+                msg = msg .. " - " .. err
+            end
+            return kong.response.exit(500, msg)
         end
     end
 end
