@@ -84,26 +84,12 @@ function CustomHandler:access(config)
         return do_authentication(session, nil, config.anonymous)
     end
 
-    -- check if email retrieved from provider
+    -- extract email from provider response
     local provider = data.grant.provider
-    local email = data.grant.response.profile.email
+    local profile = data.grant.response.profile
+    local email = profile.email
     if type(email) ~= "string" then
-        -- destroy grant session
-        local ok, err = session.storage:destroy(session_id)
-        if err or not ok then
-            msg = "failed to destroy " .. session_id
-            if err then
-                msg = msg .. " - " .. err
-            end
-            return kong.response.exit(500, msg)
-        end
-        -- return 500 with potential solution
-        local err = "failed to retrieve email from " .. provider
-        if provider == "github" then
-            err = err .. ' - unset "Keep my emails private" and '
-            err = err .. "set a public email in your GitHub settings"
-        end
-        return kong.response.exit(500, err)
+        email = profile[1].email
     end
 
     -- authenticate user with username <provider>:<email>
