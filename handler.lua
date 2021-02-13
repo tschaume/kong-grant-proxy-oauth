@@ -35,7 +35,7 @@ function CustomHandler:access(config)
     end
 
     -- set up session and init with grant cookie
-    local opts = {name = "grant_session", storage = "redis", secret = config.secret}
+    local opts = {name = config.cookie_name, storage = "redis", secret = config.secret}
     opts.redis = {host = config.redis}
     local session = resty_session.new(opts)
     local cookie = resty_session.get_cookie(session)

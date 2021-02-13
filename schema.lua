@@ -11,6 +11,7 @@ return {
                 {secret = {type = "string", required = true}},
                 {anonymous = {type = "string", required = true}},
                 {redis = {type = "string", required = true, default = "redis"}},
+                {cookie_name = {type = "string", required = true, default = "grant_session"}},
             },
         }},
     },
