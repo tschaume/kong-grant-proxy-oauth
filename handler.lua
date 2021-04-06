@@ -126,7 +126,7 @@ end
 
 function do_authentication(session, consumerid_or_username, anonymous)
     -- load consumer
-    local consumer
+    local consumer = nil
     if consumerid_or_username then
         consumer = kong.client.load_consumer(consumerid_or_username, true)
         if not consumer then
@@ -146,6 +146,11 @@ function do_authentication(session, consumerid_or_username, anonymous)
     -- load and authenticate anonymous consumer if needed
     if not consumer then
         consumer = kong.client.load_consumer(anonymous, true)
+        if not consumer then
+            -- anonymous consumer not created
+            msg = "anonymous user not created: " .. anonymous
+            return kong.response.exit(500, msg)
+        end
         return set_consumer(consumer)
     end
 
