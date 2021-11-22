@@ -17,4 +17,4 @@ RUN cd /grant-proxy-oauth && luarocks make
 USER kong
 
 #CMD ["kong", "migrations", "bootstrap"]
-CMD ["sh", "-c", "kong migrations up && kong migrations finish && kong start"]
+CMD ["sh", "-c", "kong migrations bootstrap && kong migrations up && kong migrations finish && kong start"]
