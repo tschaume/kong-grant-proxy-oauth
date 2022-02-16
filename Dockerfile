@@ -21,6 +21,7 @@ WORKDIR grant-proxy-oauth
 COPY handler.lua .
 COPY schema.lua .
 COPY kong-grant-proxy-oauth-0.0-0.rockspec .
+#RUN luarocks install penlight
 RUN luarocks make
 
 COPY start.sh .

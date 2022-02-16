@@ -5,6 +5,7 @@ local constants = require "kong.constants"
 local BasePlugin = require "kong.plugins.base_plugin"
 local kong_utils = require "kong.tools.utils"
 local acl_groups = require "kong.plugins.acl.groups"
+-- local pl_pretty = require "pl.pretty"
 -- local openssl = require('openssl')
 
 local ngx = ngx
@@ -89,7 +90,17 @@ function CustomHandler:access(config)
     local profile = data.grant.response.profile
     local email = profile.email
     if type(email) ~= "string" then
-        email = profile[1].email
+        for _, prof in ipairs(profile) do
+            if prof.primary then
+                email = prof.email
+                break
+            end
+        end
+    end
+
+    -- catch error with extracting email
+    if type(email) ~= "string" then
+        return destroy_grant_session(session, session_id)
     end
 
     -- authenticate user with username <provider>:<email>
@@ -99,14 +110,7 @@ function CustomHandler:access(config)
 
     -- destroy grant session
     if kong.client.get_credential() then
-        local ok, err = session.storage:destroy(session_id)
-        if err or not ok then
-            msg = "failed to destroy " .. session_id
-            if err then
-                msg = msg .. " - " .. err
-            end
-            return kong.response.exit(500, msg)
-        end
+        destroy_grant_session(session, session_id)
     end
 end
 
@@ -123,6 +127,18 @@ end
 --     local signature = encoded -- TODO .replace(/\=+$/, '')
 --     return val .. "." .. signature
 -- end
+
+function destroy_grant_session(session, session_id)
+    -- destroy grant session
+    local ok, err = session.storage:destroy(session_id)
+    if err or not ok then
+        msg = "failed to destroy " .. session_id
+        if err then
+            msg = msg .. " - " .. err
+        end
+        return kong.response.exit(500, msg)
+    end
+end
 
 function do_authentication(session, consumerid_or_username, anonymous)
     -- load consumer
