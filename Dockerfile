@@ -1,7 +1,10 @@
-FROM kong:2.7.0-alpine
+FROM kong:2.7.1-alpine
 
 USER root
-ENV LUA_PATH /usr/local/share/lua/5.1/?.lua;;
+ENV LUA_PATH=/usr/local/share/lua/5.1/?.lua;; \
+    DD_SERVICE=kong \
+    DD_ENV=prod \
+    DD_VERSION=dev
 
 RUN apk add --no-cache wget && \
     wget -q https://raw.githubusercontent.com/tschaume/kong/feat/persistent-cookie/kong/plugins/session/schema.lua && \
@@ -22,6 +25,11 @@ RUN luarocks make
 
 COPY start.sh .
 RUN chmod a+rx start.sh
+
+LABEL com.datadoghq.ad.check_names='["kong"]'
+LABEL com.datadoghq.ad.init_configs='[{}]'
+LABEL com.datadoghq.ad.instances='{"openmetrics_endpoint:": "http://%%host%%:8001/metrics"}'
+LABEL com.datadoghq.ad.logs='[{"source": "kong", "service": "kong"}]'
 
 USER kong
 CMD ./start.sh
