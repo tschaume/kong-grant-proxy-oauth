@@ -5,11 +5,13 @@ local constants = require "kong.constants"
 local BasePlugin = require "kong.plugins.base_plugin"
 local kong_utils = require "kong.tools.utils"
 local acl_groups = require "kong.plugins.acl.groups"
+local jwt_decoder = require "kong.plugins.jwt.jwt_parser"
 -- local pl_pretty = require "pl.pretty"
 -- local openssl = require('openssl')
 
 local ngx = ngx
 local kong = kong
+local tostring = tostring
 local CustomHandler = BasePlugin:extend()
 
 CustomHandler.VERSION  = "0.0-0"
@@ -80,27 +82,63 @@ function CustomHandler:access(config)
     end
 
     -- check if oauth cycle completed
-    if type(data.grant.response) ~= "table" then
+    local response = data.grant.response
+    if type(response) ~= "table" then
         kong.log.notice("anonymous - grant oauth cycle not completed yet")
         return do_authentication(session, nil, config.anonymous)
     end
 
+    -- check for error in token request by grant
+    if response.error then
+        kong.log.error(response.error)
+        destroy_grant_session(session, session_id)
+        return kong.response.exit(500, response.error)
+    end
+
     -- extract email from provider response
+    local email = nil
     local provider = data.grant.provider
-    local profile = data.grant.response.profile
-    local email = profile.email
-    if type(email) ~= "string" then
-        for _, prof in ipairs(profile) do
-            if prof.primary then
-                email = prof.email
-                break
+    if response.profile then
+        -- providers with profile_url and profile in response
+        email = response.profile.email
+        if type(email) ~= "string" then
+            for _, prof in ipairs(response.profile) do
+                if prof.primary then
+                    email = prof.email
+                    break
+                else
+                    local msg = "could not extract email from " .. provider .. " profile"
+                    kong.log.error(msg)
+                    destroy_grant_session(session, session_id)
+                    return kong.response.exit(500, msg)
+                end
             end
+        end
+    else
+        -- providers with id_token only (eg Portier)
+        local jwt, err = jwt_decoder:new(response.id_token)
+        if err then
+            local msg = "Bad token; " .. tostring(err)
+            kong.log.error(msg)
+            destroy_grant_session(session, session_id)
+            return kong.response.exit(401, msg)
+        end
+        if jwt.claims.email_verified then
+            email = jwt.claims.email
+        else
+            local msg = provider .. " email not verified"
+            kong.log.error(msg)
+            destroy_grant_session(session, session_id)
+            return kong.response.exit(401, msg)
         end
     end
 
-    -- catch error with extracting email
+    -- catch bad email just in case
     if type(email) ~= "string" then
-        return destroy_grant_session(session, session_id)
+        local msg = "could not extract valid email from " .. provider .. " token response"
+        kong.log.error(msg)
+        destroy_grant_session(session, session_id)
+        return kong.response.exit(500, msg)
     end
 
     -- authenticate user with username <provider>:<email>
