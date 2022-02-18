@@ -30,7 +30,7 @@ RUN chmod a+rx start.sh
 
 LABEL com.datadoghq.ad.check_names='["kong"]'
 LABEL com.datadoghq.ad.init_configs='[{}]'
-LABEL com.datadoghq.ad.instances='{"openmetrics_endpoint:": "http://%%host%%:8001/metrics"}'
+LABEL com.datadoghq.ad.instances='[{"openmetrics_endpoint": "http://%%host%%:8001/metrics"}]'
 LABEL com.datadoghq.ad.logs='[{"source": "kong", "service": "kong"}]'
 
 USER kong
