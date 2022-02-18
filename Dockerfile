@@ -1,10 +1,11 @@
 FROM kong:2.7.1-alpine
 
 USER root
+ARG VERSION
 ENV LUA_PATH=/usr/local/share/lua/5.1/?.lua;; \
     DD_SERVICE=kong \
     DD_ENV=prod \
-    DD_VERSION=dev
+    DD_VERSION=$VERSION
 
 RUN apk add --no-cache wget && \
     wget -q https://raw.githubusercontent.com/tschaume/kong/feat/persistent-cookie/kong/plugins/session/schema.lua && \
