@@ -106,11 +106,6 @@ function CustomHandler:access(config)
                 if prof.primary then
                     email = prof.email
                     break
-                else
-                    local msg = "could not extract email from " .. provider .. " profile"
-                    kong.log.error(msg)
-                    destroy_grant_session(session, session_id)
-                    return kong.response.exit(500, msg)
                 end
             end
         end
