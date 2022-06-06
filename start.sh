@@ -8,4 +8,4 @@ echo CODE=$code
 [[ $code -eq 4 ]] && echo "FINISH" && kong migrations finish
 [[ $code -eq 5 ]] && echo "UP & FINISH" && kong migrations up && kong migrations finish
 
-kong start
+kong start --nginx-conf custom-nginx.template

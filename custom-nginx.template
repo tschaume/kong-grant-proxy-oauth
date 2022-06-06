@@ -1,0 +1,30 @@
+worker_processes ${{NGINX_WORKER_PROCESSES}}; # can be set by kong.conf
+daemon ${{NGINX_DAEMON}};                     # can be set by kong.conf
+
+pid pids/nginx.pid;                      # this setting is mandatory
+error_log ${{PROXY_ERROR_LOG}} ${{LOG_LEVEL}}; # can be set by kong.conf
+
+events {
+  use epoll; # custom setting
+  multi_accept on;
+}
+
+http {
+    log_format json_combined escape=json
+        '{ '
+        '"date_access": "$time_iso8601", '
+        '"request_time": $request_time, '
+        '"consumer_id": "$sent_http_x_consumer_id", '
+        '"client": "$remote_addr", '
+        '"network": {"bytes_written": $bytes_sent}, '
+        '"http": {'
+        '"method": "$request_method", '
+        '"status_code": "$status", '
+        '"url": "$scheme://$host$request_uri", '
+        '"referer": "$http_referer", '
+        '"useragent": "$http_user_agent"'
+        '}'
+        '}';
+
+    include 'nginx-kong.conf';
+}

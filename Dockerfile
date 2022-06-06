@@ -33,5 +33,8 @@ LABEL com.datadoghq.ad.init_configs='[{}]'
 LABEL com.datadoghq.ad.instances='[{"openmetrics_endpoint": "http://%%host%%:8001/metrics"}]'
 LABEL com.datadoghq.ad.logs='[{"source": "kong", "service": "kong"}]'
 
+COPY custom-nginx.template .
+RUN chmod a+rx custom-nginx.template
+
 USER kong
 CMD ./start.sh
