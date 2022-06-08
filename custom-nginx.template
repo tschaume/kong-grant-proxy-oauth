@@ -19,7 +19,7 @@ http {
         '"network": {"bytes_written": $bytes_sent}, '
         '"http": {'
         '"method": "$request_method", '
-        '"status_code": "$status", '
+        '"status_code": $status, '
         '"url": "$scheme://$host$request_uri", '
         '"referer": "$http_referer", '
         '"useragent": "$http_user_agent"'
