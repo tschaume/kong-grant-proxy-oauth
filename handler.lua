@@ -165,7 +165,7 @@ function destroy_grant_session(session, session_id)
     -- destroy grant session
     local ok, err = session.storage:destroy(session_id)
     if err or not ok then
-        msg = "failed to destroy " .. session_id
+        local msg = "failed to destroy " .. session_id
         if err then
             msg = msg .. " - " .. err
         end
@@ -197,7 +197,7 @@ function do_authentication(session, consumerid_or_username, anonymous)
         consumer = kong.client.load_consumer(anonymous, true)
         if not consumer then
             -- anonymous consumer not created
-            msg = "anonymous user not created: " .. anonymous
+            local msg = "anonymous user not created: " .. anonymous
             return kong.response.exit(500, msg)
         end
         return set_consumer(consumer)
