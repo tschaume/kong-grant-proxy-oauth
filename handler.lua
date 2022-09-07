@@ -90,7 +90,7 @@ function CustomHandler:access(config)
 
     -- check for error in token request by grant
     if response.error then
-        kong.log.error(response.error)
+        kong.log.err(response.error)
         destroy_grant_session(session, session_id)
         return kong.response.exit(500, response.error)
     end
@@ -114,7 +114,7 @@ function CustomHandler:access(config)
         local jwt, err = jwt_decoder:new(response.id_token)
         if err then
             local msg = "Bad token; " .. tostring(err)
-            kong.log.error(msg)
+            kong.log.err(msg)
             destroy_grant_session(session, session_id)
             return kong.response.exit(401, msg)
         end
@@ -122,7 +122,7 @@ function CustomHandler:access(config)
             email = jwt.claims.email
         else
             local msg = provider .. " email not verified"
-            kong.log.error(msg)
+            kong.log.err(msg)
             destroy_grant_session(session, session_id)
             return kong.response.exit(401, msg)
         end
@@ -131,7 +131,7 @@ function CustomHandler:access(config)
     -- catch bad email just in case
     if type(email) ~= "string" then
         local msg = "could not extract valid email from " .. provider .. " token response"
-        kong.log.error(msg)
+        kong.log.err(msg)
         destroy_grant_session(session, session_id)
         return kong.response.exit(500, msg)
     end
