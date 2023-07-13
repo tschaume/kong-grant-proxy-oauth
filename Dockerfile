@@ -7,7 +7,7 @@ ENV LUA_PATH=/usr/local/share/lua/5.1/?.lua;; \
     DD_ENV=prod \
     DD_VERSION=$VERSION
 
-RUN apk add --no-cache wget && \
+RUN apk add --no-cache wget curl httpie && \
     wget -q https://raw.githubusercontent.com/tschaume/kong/feat/persistent-cookie/kong/plugins/session/schema.lua && \
     mv schema.lua /usr/local/share/lua/5.1/kong/plugins/session/ && \
     wget -q https://raw.githubusercontent.com/tschaume/kong/feat/persistent-cookie/kong/plugins/session/session.lua && \
