@@ -1,4 +1,4 @@
-FROM kong:2.8.3-alpine
+FROM kong:3.3.1-alpine
 
 USER root
 ARG VERSION
