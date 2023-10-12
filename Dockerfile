@@ -1,4 +1,4 @@
-FROM kong:2.8.3-alpine
+FROM kong:2.8.4-alpine
 
 USER root
 ARG VERSION
@@ -13,10 +13,6 @@ RUN apk add --no-cache wget curl httpie && \
     wget -q https://raw.githubusercontent.com/tschaume/kong/feat/persistent-cookie/kong/plugins/session/session.lua && \
     mv session.lua /usr/local/share/lua/5.1/kong/plugins/session/ && \
     chmod -R a+r /usr/local/share/lua/5.1/kong/plugins/session
-
-RUN wget -q https://raw.githubusercontent.com/Kong/kong/master/kong/db/schema/metaschema.lua && \
-    mv metaschema.lua /usr/local/share/lua/5.1/kong/db/schema/ && \
-    chmod a+r /usr/local/share/lua/5.1/kong/db/schema/metaschema.lua
 
 WORKDIR grant-proxy-oauth
 COPY handler.lua .
