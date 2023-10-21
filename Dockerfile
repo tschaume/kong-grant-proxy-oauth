@@ -27,7 +27,7 @@ RUN chmod a+rx start.sh
 LABEL com.datadoghq.ad.check_names='["kong"]'
 LABEL com.datadoghq.ad.init_configs='[{}]'
 LABEL com.datadoghq.ad.instances='[{"openmetrics_endpoint": "http://%%host%%:8001/metrics"}]'
-LABEL com.datadoghq.ad.logs='[{"source": "kong", "service": "kong"}]'
+LABEL com.datadoghq.ad.logs='[{"source": "kong", "service": "kong", "log_processing_rules": [{"type": "exclude_at_match", "name": "exclude_logs", "pattern": "(?:queryDns)|(?:\"status_code\":\\s20)"}]}]'
 
 COPY custom-nginx.template .
 RUN chmod a+rx custom-nginx.template
