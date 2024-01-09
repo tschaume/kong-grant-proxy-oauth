@@ -200,7 +200,11 @@ function do_authentication(session, consumerid_or_username, anonymous)
             local msg = "anonymous user not created: " .. anonymous
             return kong.response.exit(500, msg)
         end
-        return set_consumer(consumer)
+        local consumer_groups, err = acl_groups.get_consumer_groups(consumer.id)
+        if err then
+            return nil, err
+        end
+        return set_consumer(consumer, nil, consumer_groups)
     end
 
     -- authenticate user (incl. credential and groups)
