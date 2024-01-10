@@ -19,6 +19,7 @@ COPY handler.lua .
 COPY schema.lua .
 COPY kong-grant-proxy-oauth-0.0-0.rockspec .
 #RUN luarocks install penlight
+RUN luarocks install lua-resty-cookie
 RUN luarocks make
 
 COPY start.sh .

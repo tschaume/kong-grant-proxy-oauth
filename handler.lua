@@ -6,6 +6,7 @@ local BasePlugin = require "kong.plugins.base_plugin"
 local kong_utils = require "kong.tools.utils"
 local acl_groups = require "kong.plugins.acl.groups"
 local jwt_decoder = require "kong.plugins.jwt.jwt_parser"
+local resty_cookie = require "resty.cookie"
 -- local pl_pretty = require "pl.pretty"
 -- local openssl = require('openssl')
 
@@ -243,6 +244,23 @@ function load_credential(consumer_pk)
     end
 end
 
+function set_cookie(key, value)
+    local cookie, err = resty_cookie:new()
+    if not cookie then
+        kong.log.err(err)
+        return
+    end
+    local ok, err = cookie:set({
+        key = key, value = value, path="/",
+        domain = ".materialsproject.org",
+        secure = false, samesite = "Strict"
+    })
+    if not ok then
+        kong.log.err(err)
+        return
+    end
+end
+
 function set_consumer(consumer, credential, groups)
     local set_header = kong.service.request.set_header
     local clear_header = kong.service.request.clear_header
@@ -273,11 +291,13 @@ function set_consumer(consumer, credential, groups)
     end
 
     if credential then
+        set_cookie("_csrf_token", "authenticated")
         clear_header(constants.HEADERS.ANONYMOUS)
         if constants.HEADERS.CREDENTIAL_IDENTIFIER then
             set_header(constants.HEADERS.CREDENTIAL_IDENTIFIER, credential.id)
         end
     else
+        set_cookie("_csrf_token", "anonymous")
         set_header(constants.HEADERS.ANONYMOUS, true)
         if constants.HEADERS.CREDENTIAL_IDENTIFIER then
             clear_header(constants.HEADERS.CREDENTIAL_IDENTIFIER)
