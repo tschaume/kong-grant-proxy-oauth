@@ -5,7 +5,9 @@ ARG VERSION
 ENV LUA_PATH=/usr/local/share/lua/5.1/?.lua;; \
   DD_SERVICE=kong \
   DD_ENV=prod \
-  DD_VERSION=$VERSION
+  DD_VERSION=$VERSION \
+  DD_PROFILING_ENABLED=true \
+  DD_LOGS_INJECTION=true
 
 RUN apk add --no-cache wget curl httpie && \
   wget -q https://raw.githubusercontent.com/tschaume/kong/feat/persistent-cookie/kong/plugins/session/schema.lua && \
