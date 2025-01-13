@@ -16,7 +16,7 @@ RUN apk add --no-cache wget curl httpie && \
   mv session.lua /usr/local/share/lua/5.1/kong/plugins/session/ && \
   chmod -R a+r /usr/local/share/lua/5.1/kong/plugins/session
 
-WORKDIR /grant-proxy-oauth
+WORKDIR grant-proxy-oauth
 COPY handler.lua .
 COPY schema.lua .
 COPY kong-grant-proxy-oauth-0.0-0.rockspec .
