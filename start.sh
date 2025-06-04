@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 kong migrations list
 code=$?
