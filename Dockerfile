@@ -9,6 +9,11 @@ ENV LUA_PATH=/usr/local/share/lua/5.1/?.lua;; \
   DD_PROFILING_ENABLED=true \
   DD_LOGS_INJECTION=true
 
+RUN apk add git lua5.4 lua5.4-dev make
+RUN git clone --depth 1 https://github.com/luarocks/luarocks
+RUN cd luarocks && ./configure --prefix=/usr/local/openresty/luajit --lua-version=5.4 && make && make install
+RUN luarocks config lua_version 5.1
+
 RUN apk add --no-cache wget curl httpie && \
   wget -q https://raw.githubusercontent.com/tschaume/kong/feat/persistent-cookie/kong/plugins/session/schema.lua && \
   mv schema.lua /usr/local/share/lua/5.1/kong/plugins/session/ && \
@@ -21,8 +26,8 @@ COPY handler.lua .
 COPY schema.lua .
 COPY kong-grant-proxy-oauth-0.0-0.rockspec .
 #RUN luarocks install penlight
-RUN luarocks install lua-resty-cookie
-RUN luarocks make
+RUN /usr/local/openresty/luajit/bin/luarocks install --tree /usr/local lua-resty-cookie
+RUN /usr/local/openresty/luajit/bin/luarocks --tree /usr/local/ make
 
 COPY start.sh .
 RUN chmod a+rx start.sh
